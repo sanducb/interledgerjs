@@ -100,6 +100,8 @@ export interface PayOptions {
   destination: ResolvedPayment
   /** Parameters of payment execution */
   quote: Quote
+  /** Optional application data to include as a single StreamData frame on the first packet */
+  appData?: Uint8Array | string | Buffer
   /**
    * Callback to process streaming updates as packets are sent and received,
    * such as to perform accounting while the payment is in progress.

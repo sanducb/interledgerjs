@@ -5,6 +5,7 @@ import {
   FrameType,
   StreamMoneyFrame,
   StreamReceiptFrame,
+  StreamDataFrame,
 } from 'ilp-protocol-stream/dist/src/packet'
 import { MaxPacketAmountController } from '../controllers/max-packet'
 import { ExchangeRateController } from '../controllers/exchange-rate'
@@ -68,13 +69,17 @@ export class PaymentSender extends StreamSender<PaymentProgress> {
 
   private readonly rateCalculator: ExchangeRateController
   private readonly maxPacketController: MaxPacketAmountController
+  private readonly appData?: Buffer
 
-  constructor({ plugin, destination, quote, progressHandler }: PaymentSenderOptions) {
+  constructor({ plugin, destination, quote, progressHandler, appData }: PaymentSenderOptions) {
     super(plugin, destination)
     const { requestCounter } = destination
 
     this.quote = quote
     this.progressHandler = progressHandler
+    if (appData) {
+      this.appData = Buffer.isBuffer(appData) ? appData : Buffer.from(appData)
+    }
 
     this.maxPacketController = new MaxPacketAmountController(this.quote.maxPacketAmount)
     this.rateCalculator = new ExchangeRateController(
@@ -164,6 +169,12 @@ export class PaymentSender extends StreamSender<PaymentProgress> {
     this.appliedRoundingCorrection = applyCorrection
 
     this.progressHandler?.(this.getProgress())
+
+    // Inject a single StreamData frame on the first packet if appData is provided
+    if (this.appData && this.quote.paymentType === PaymentType.FixedDelivery && request.sequence === 1) {
+      // Offset is 0 for a one-shot payload
+      request.addFrames(new StreamDataFrame(PaymentSender.DEFAULT_STREAM_ID, 0, this.appData))
+    }
 
     request
       .setSourceAmount(sourceAmount)
