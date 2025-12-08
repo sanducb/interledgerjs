@@ -172,6 +172,8 @@ export enum PaymentError {
   UnknownDestinationAsset = 'UnknownDestinationAsset',
   /** Receiver sent conflicting destination asset details */
   DestinationAssetConflict = 'DestinationAssetConflict',
+  /** Receiver rejected the first packet containing application data */
+  AppDataRejected = 'AppDataRejected',
   /** Failed to compute minimum rate: prices for source or destination assets were invalid or not provided */
   ExternalRateUnavailable = 'ExternalRateUnavailable',
   /** Rate probe failed to establish the exchange rate or discover path max packet amount */
