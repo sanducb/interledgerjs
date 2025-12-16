@@ -20,6 +20,7 @@ import {
   ErrorCode,
   FrameType,
   ConnectionNewAddressFrame,
+  StreamDataFrame,
   StreamReceiptFrame,
 } from 'ilp-protocol-stream/dist/src/packet'
 import Long from 'long'
@@ -332,6 +333,62 @@ describe('handling packets', () => {
     )
     expect(replyPacket.sequence).toEqual(Long.UZERO)
     expect(replyPacket.prepareAmount).toEqual(Long.UZERO)
+  })
+
+  it('exposes STREAM data frames on incoming packets', async () => {
+    const { sharedSecret, ilpAddress } = server.generateCredentials()
+    const encryptionKey = hmac(sharedSecret, Buffer.from('ilp_stream_encryption'))
+    const streamPacket = await new Packet(1, IlpPacketType.Prepare, 1, [
+      new StreamDataFrame(1, 0, Buffer.from('hello')),
+    ]).serializeAndEncrypt(encryptionKey)
+
+    const fulfillmentKey = hmac(sharedSecret, Buffer.from('ilp_stream_fulfillment'))
+    const fulfillment = hmac(fulfillmentKey, streamPacket)
+    const executionCondition = sha256(fulfillment)
+
+    const prepare: IlpPrepare = {
+      amount: '1',
+      destination: ilpAddress,
+      executionCondition,
+      expiresAt: new Date(),
+      data: streamPacket,
+    }
+
+    const money = server.createReply(prepare) as IncomingMoney
+
+    expect(isIlpReply(money)).toBe(false)
+    expect(money.dataFrames).toEqual([
+      {
+        streamId: 1,
+        offset: '0',
+        data: Buffer.from('hello'),
+      },
+    ])
+  })
+
+  it('omits data frames when none are present', async () => {
+    const { sharedSecret, ilpAddress } = server.generateCredentials()
+    const encryptionKey = hmac(sharedSecret, Buffer.from('ilp_stream_encryption'))
+    const streamPacket = await new Packet(1, IlpPacketType.Prepare, 1).serializeAndEncrypt(
+      encryptionKey
+    )
+
+    const fulfillmentKey = hmac(sharedSecret, Buffer.from('ilp_stream_fulfillment'))
+    const fulfillment = hmac(fulfillmentKey, streamPacket)
+    const executionCondition = sha256(fulfillment)
+
+    const prepare: IlpPrepare = {
+      amount: '1',
+      destination: ilpAddress,
+      executionCondition,
+      expiresAt: new Date(),
+      data: streamPacket,
+    }
+
+    const money = server.createReply(prepare) as IncomingMoney
+
+    expect(isIlpReply(money)).toBe(false)
+    expect(money.dataFrames).toBeUndefined()
   })
 
   it('rejects if exchange rate is insufficient', async () => {
