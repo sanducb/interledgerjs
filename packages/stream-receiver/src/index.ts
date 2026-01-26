@@ -19,6 +19,7 @@ import {
   ErrorCode,
   ConnectionAssetDetailsFrame,
   StreamReceiptFrame,
+  StreamDataFrame,
 } from 'ilp-protocol-stream/dist/src/packet'
 import { LongValue } from 'ilp-protocol-stream/dist/src/util/long'
 import { createReceipt } from 'ilp-protocol-stream/dist/src/util/receipt'
@@ -66,7 +67,7 @@ export interface IncomingMoney {
   finalDecline(): IlpReject
 
   /** Application StreamData frames carried on this Prepare (if any) */
-  dataFrames?: Array<{ streamId: number; offset: string; data: Buffer }>
+  dataFrames?: StreamDataFrame[]
 }
 
 /** Application-layer metadata to encode within the credentials of a new STREAM connection. */
@@ -334,13 +335,9 @@ export class StreamServer {
     )
     log.trace('STREAM request frames: %o', streamRequest.frames)
 
-    const dataFrames = streamRequest.frames
-      .filter((f) => f.type === FrameType.StreamData)
-      .map((f: any) => ({
-        streamId: Number(f.streamId?.toString ? f.streamId.toString() : f.streamId) || 0,
-        offset: (f.offset?.toString && f.offset.toString()) || '0',
-        data: f.data as Buffer,
-      }))
+    const dataFrames = streamRequest.frames.filter(
+      (f): f is StreamDataFrame => f.type === FrameType.StreamData
+    )
 
     reply
       .setEncryptionKey(encryptionKey)
@@ -414,7 +411,7 @@ export class StreamServer {
       connectionId,
 
       paymentTag,
-      
+
       dataFrames: dataFrames.length > 0 ? dataFrames : undefined,
 
       setTotalReceived: (totalReceived: LongValue) => {

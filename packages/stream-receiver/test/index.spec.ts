@@ -357,13 +357,11 @@ describe('handling packets', () => {
     const money = server.createReply(prepare) as IncomingMoney
 
     expect(isIlpReply(money)).toBe(false)
-    expect(money.dataFrames).toEqual([
-      {
-        streamId: 1,
-        offset: '0',
-        data: Buffer.from('hello'),
-      },
-    ])
+    expect(money.dataFrames).toBeDefined()
+    expect(money.dataFrames!.length).toBe(1)
+    expect(money.dataFrames![0].streamId.toNumber()).toBe(1)
+    expect(money.dataFrames![0].offset.toString()).toBe('0')
+    expect(money.dataFrames![0].data).toEqual(Buffer.from('hello'))
   })
 
   it('omits data frames when none are present', async () => {
