@@ -1780,7 +1780,7 @@ describe('application data handling', () => {
       if (hasAppData && hasMoney && rejectedPackets === 0) {
         rejectedPackets++
         return {
-          code: IlpError.F06_UNEXPECTED_PAYMENT,
+          code: IlpError.F99_APPLICATION_ERROR,
           message: 'KYC rejected',
           triggeredBy: '',
           data: Buffer.from('kyc denied'),
