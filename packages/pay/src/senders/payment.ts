@@ -19,7 +19,7 @@ import { EstablishmentController } from '../controllers/establishment'
 import { SequenceController } from '../controllers/sequence'
 import { decodeReceipt, Receipt as StreamReceipt } from 'ilp-protocol-stream'
 import { StreamSender } from '.'
-import { AppDataController } from '../controllers/app-data'
+import { AppController } from '../controllers/app'
 
 /** Completion criteria of the payment */
 export enum PaymentType {
@@ -69,6 +69,7 @@ export class PaymentSender extends StreamSender<PaymentProgress> {
 
   private readonly rateCalculator: ExchangeRateController
   private readonly maxPacketController: MaxPacketAmountController
+  private readonly failureController: FailureController
 
   constructor({ plugin, destination, quote, progressHandler, appData }: PaymentSenderOptions) {
     super(plugin, destination)
@@ -82,18 +83,14 @@ export class PaymentSender extends StreamSender<PaymentProgress> {
       quote.lowEstimatedExchangeRate,
       quote.highEstimatedExchangeRate
     )
-
-    const appDataController =
-      appData
-        ? new AppDataController(appData, PaymentSender.DEFAULT_STREAM_ID)
-        : undefined
+    this.failureController = new FailureController()
 
     this.controllers = [
       new SequenceController(requestCounter),
       new EstablishmentController(destination),
       new ExpiryController(),
-      ...(appDataController ? [appDataController] : []),
-      new FailureController(),
+      new AppController(appData, PaymentSender.DEFAULT_STREAM_ID),
+      this.failureController,
       new TimeoutController(),
       this.maxPacketController,
       new AssetDetailsController(destination),
@@ -286,6 +283,7 @@ export class PaymentSender extends StreamSender<PaymentProgress> {
       amountDelivered: this.amountDelivered.value,
       sourceAmountInFlight: this.sourceAmountInFlight.value,
       destinationAmountInFlight: this.destinationAmountInFlight.value,
+      applicationData: this.failureController.getApplicationData(),
     }
   }
 

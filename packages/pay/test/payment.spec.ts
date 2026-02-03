@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion, prefer-const */
-import { StreamServer } from '@interledger/stream-receiver'
+import { StreamServer, IncomingMoney } from '@interledger/stream-receiver'
 import { describe, expect, it, jest } from '@jest/globals'
 import { createApp } from 'ilp-connector'
 import {
@@ -1399,7 +1399,7 @@ describe('payment execution', () => {
     await streamServer.close()
   })
 
-  it('ends payment if receiver closes the connection', async () => {
+  it('ends payment if receiver calls finalDecline', async () => {
     const plugin = createPlugin(async (prepare) => {
       const moneyOrReply = streamServer.createReply(prepare)
       return isIlpReply(moneyOrReply) ? moneyOrReply : moneyOrReply.finalDecline()
@@ -1423,7 +1423,7 @@ describe('payment execution', () => {
     })
 
     const { error } = await pay({ plugin, destination, quote })
-    expect(error).toBe(PaymentError.ClosedByReceiver)
+    expect(error).toBe(PaymentError.ApplicationError)
   })
 
   it('works with 100% slippage', async () => {
@@ -1768,6 +1768,10 @@ describe('application data handling', () => {
 
     let rejectedPackets = 0
     const plugin = createPlugin(async (prepare, next) => {
+      const result = streamServer.createReply(prepare)
+      if (isIlpReply(result)) return result
+
+      const money = result as IncomingMoney
       const streamPacket = await Packet.decryptAndDeserialize(encryptionKey, prepare.data)
       const frames = streamPacket.frames ?? []
       const hasAppData = frames.some(
@@ -1779,12 +1783,7 @@ describe('application data handling', () => {
 
       if (hasAppData && hasMoney && rejectedPackets === 0) {
         rejectedPackets++
-        return {
-          code: IlpError.F99_APPLICATION_ERROR,
-          message: 'KYC rejected',
-          triggeredBy: '',
-          data: Buffer.from('kyc denied'),
-        }
+        return money.finalDecline('kyc denied')
       }
 
       return next(prepare)
@@ -1817,7 +1816,7 @@ describe('application data handling', () => {
       appData: Buffer.from('kyc-info'),
     })
 
-    expect(receipt.error).toBe(PaymentError.AppDataRejected)
+    expect(receipt.error).toBe(PaymentError.ApplicationError)
     expect(rejectedPackets).toBe(1)
   })
 
@@ -1936,7 +1935,7 @@ describe('application data handling', () => {
     })
 
     expect(rejectedAfterAppData).toBe(true)
-    expect(receipt.error).not.toBe(PaymentError.AppDataRejected)
+    expect(receipt.error).not.toBe(PaymentError.ApplicationError)
   })
 })
 

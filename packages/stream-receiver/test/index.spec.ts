@@ -4,7 +4,9 @@ import { StreamServer, IncomingMoney } from '../src'
 import { randomBytes } from 'ilp-protocol-stream/dist/src/crypto'
 import {
   isIlpReply,
+  isFulfill,
   IlpError,
+  IlpFulfill,
   IlpReject,
   isValidIlpAddress,
   IlpPrepare,
@@ -307,22 +309,22 @@ describe('handling packets', () => {
       new ConnectionNewAddressFrame('g.sender'),
     ]).serializeAndEncrypt(key)
 
+    const fulfillmentKey = hmac(sharedSecret, Buffer.from('ilp_stream_fulfillment'))
+    const fulfillment = hmac(fulfillmentKey, data)
+    const executionCondition = sha256(fulfillment)
+
     const prepare: IlpPrepare = {
       amount: '0',
       destination: ilpAddress,
-      executionCondition: Buffer.alloc(32),
+      executionCondition,
       expiresAt: new Date(),
       data,
     }
 
-    const reply = server.createReply(prepare) as IlpReject
+    const reply = server.createReply(prepare)
 
-    expect(isIlpReply(reply))
-    expect(reply.code).toBe(IlpError.F99_APPLICATION_ERROR)
-    expect(reply.triggeredBy).toBe(serverAddress)
-
-    // Includes reply packet with echoed ConnectionClose frame
-    const replyPacket = await Packet.decryptAndDeserialize(key, reply.data)
+    expect(isFulfill(reply)).toBe(true)
+    const replyPacket = await Packet.decryptAndDeserialize(key, (reply as IlpFulfill).data)
     expect(
       replyPacket.frames.some(
         (f) =>
@@ -395,10 +397,14 @@ describe('handling packets', () => {
     const key = hmac(sharedSecret, Buffer.from('ilp_stream_encryption'))
     const data = await new Packet(1, IlpPacketType.Prepare, 2).serializeAndEncrypt(key)
 
+    const fulfillmentKey = hmac(sharedSecret, Buffer.from('ilp_stream_fulfillment'))
+    const fulfillment = hmac(fulfillmentKey, data)
+    const executionCondition = sha256(fulfillment)
+
     const prepare: IlpPrepare = {
       amount: '1', // Received 1 unit, but minimum is 2
       destination: ilpAddress,
-      executionCondition: Buffer.alloc(32),
+      executionCondition,
       expiresAt: new Date(),
       data,
     }
@@ -406,7 +412,7 @@ describe('handling packets', () => {
     const reply = server.createReply(prepare) as IlpReject
 
     expect(isIlpReply(reply))
-    expect(reply.code).toBe(IlpError.F99_APPLICATION_ERROR)
+    expect(reply.code).toBe(IlpError.F04_INSUFFICIENT_DESTINATION_AMOUNT)
     expect(reply.triggeredBy).toBe(serverAddress)
 
     const replyPacket = await Packet.decryptAndDeserialize(key, reply.data)
@@ -431,7 +437,7 @@ describe('handling packets', () => {
     const reply = server.createReply(prepare) as IlpReject
 
     expect(isIlpReply(reply))
-    expect(reply.code).toBe(IlpError.F99_APPLICATION_ERROR)
+    expect(reply.code).toBe(IlpError.F05_WRONG_CONDITION)
     expect(reply.triggeredBy).toBe(serverAddress)
 
     const replyPacket = await Packet.decryptAndDeserialize(key, reply.data)
@@ -580,6 +586,38 @@ describe('handling packets', () => {
     expect(+replyPacket.sequence).toBe(1)
     expect(+replyPacket.prepareAmount).toBe(3)
     expect(replyPacket.frames.some((f) => f.type === FrameType.ConnectionClose))
+  })
+
+  it('finalDecline can include optional application data in a StreamDataFrame', async () => {
+    const { sharedSecret, ilpAddress } = server.generateCredentials()
+
+    const key = hmac(sharedSecret, Buffer.from('ilp_stream_encryption'))
+    const data = await new Packet(1, IlpPacketType.Prepare, 2).serializeAndEncrypt(key)
+
+    const fulfillmentKey = hmac(sharedSecret, Buffer.from('ilp_stream_fulfillment'))
+    const fulfillment = hmac(fulfillmentKey, data)
+    const executionCondition = sha256(fulfillment)
+
+    const prepare: IlpPrepare = {
+      amount: '3',
+      destination: ilpAddress,
+      executionCondition,
+      expiresAt: new Date(),
+      data,
+    }
+
+    const money = server.createReply(prepare) as IncomingMoney
+    const applicationData = Buffer.from('kyc denied')
+    const reply = money.finalDecline(applicationData)
+
+    expect(reply.code).toBe(IlpError.F99_APPLICATION_ERROR)
+
+    const replyPacket = await Packet.decryptAndDeserialize(key, reply.data)
+    const dataFrame = replyPacket.frames.find(
+      (f): f is StreamDataFrame => f.type === FrameType.StreamData
+    )
+    expect(dataFrame).toBeDefined()
+    expect(dataFrame!.data.equals(applicationData)).toBe(true)
   })
 
   it('exposes unique connection ids', async () => {
