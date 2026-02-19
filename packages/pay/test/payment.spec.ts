@@ -1818,6 +1818,7 @@ describe('application data handling', () => {
 
     expect(receipt.error).toBe(PaymentError.ApplicationError)
     expect(rejectedPackets).toBe(1)
+    expect(receipt.applicationData).toEqual(Buffer.from('decline reason'))
   })
 
   it('continues when packet carrying app data is accepted', async () => {
