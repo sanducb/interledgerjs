@@ -607,7 +607,7 @@ describe('handling packets', () => {
     }
 
     const money = server.createReply(prepare) as IncomingMoney
-    const applicationData = Buffer.from('kyc denied')
+    const applicationData = Buffer.from('decline reason')
     const reply = money.finalDecline(applicationData)
 
     expect(reply.code).toBe(IlpError.F99_APPLICATION_ERROR)

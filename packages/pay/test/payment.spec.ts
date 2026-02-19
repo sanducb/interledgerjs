@@ -1783,7 +1783,7 @@ describe('application data handling', () => {
 
       if (hasAppData && hasMoney && rejectedPackets === 0) {
         rejectedPackets++
-        return money.finalDecline('kyc denied')
+        return money.finalDecline('decline reason')
       }
 
       return next(prepare)
@@ -1813,7 +1813,7 @@ describe('application data handling', () => {
       plugin,
       destination,
       quote,
-      appData: Buffer.from('kyc-info'),
+      appData: Buffer.from('data-from-sender'),
     })
 
     expect(receipt.error).toBe(PaymentError.ApplicationError)
@@ -1864,7 +1864,7 @@ describe('application data handling', () => {
       plugin,
       destination,
       quote,
-      appData: Buffer.from('kyc-info'),
+      appData: Buffer.from('data-from-sender'),
     })
 
     expect(receipt.error).toBeUndefined()
@@ -1931,7 +1931,7 @@ describe('application data handling', () => {
       plugin,
       destination,
       quote,
-      appData: Buffer.from('kyc-info'),
+      appData: Buffer.from('data-from-sender'),
     })
 
     expect(rejectedAfterAppData).toBe(true)
