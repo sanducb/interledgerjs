@@ -100,6 +100,8 @@ export interface PayOptions {
   destination: ResolvedPayment
   /** Parameters of payment execution */
   quote: Quote
+  /** Optional application data to include as a single StreamData frame on the first packet */
+  appData?: Uint8Array | string | Buffer
   /**
    * Callback to process streaming updates as packets are sent and received,
    * such as to perform accounting while the payment is in progress.
@@ -123,6 +125,8 @@ export interface PaymentProgress {
   destinationAmountInFlight: bigint
   /** Latest [STREAM receipt](https://interledger.org/rfcs/0039-stream-receipts/) to provide proof-of-delivery to a 3rd party verifier */
   streamReceipt?: Uint8Array
+  /** Application data from receiver if payment was rejected with ApplicationError via finalDecline(data) */
+  applicationData?: Buffer
 }
 
 /** Payment error states */
@@ -170,6 +174,8 @@ export enum PaymentError {
   UnknownDestinationAsset = 'UnknownDestinationAsset',
   /** Receiver sent conflicting destination asset details */
   DestinationAssetConflict = 'DestinationAssetConflict',
+  /** Receiver signalled application-level rejection (F99) */
+  ApplicationError = 'ApplicationError',
   /** Failed to compute minimum rate: prices for source or destination assets were invalid or not provided */
   ExternalRateUnavailable = 'ExternalRateUnavailable',
   /** Rate probe failed to establish the exchange rate or discover path max packet amount */

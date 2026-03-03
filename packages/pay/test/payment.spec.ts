@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion, prefer-const */
-import { StreamServer } from '@interledger/stream-receiver'
+import { StreamServer, IncomingMoney } from '@interledger/stream-receiver'
 import { describe, expect, it, jest } from '@jest/globals'
 import { createApp } from 'ilp-connector'
 import {
@@ -15,6 +15,7 @@ import { Connection, createReceipt, createServer, DataAndMoneyStream } from 'ilp
 import { randomBytes } from 'crypto'
 import {
   ConnectionAssetDetailsFrame,
+  FrameType,
   IlpPacketType,
   Packet,
   StreamReceiptFrame,
@@ -710,7 +711,7 @@ describe('fixed delivery payments', () => {
           XYZ: 1,
         },
       })
-    ).rejects.toBe(PaymentError.UnenforceableDelivery)
+    ).rejects.toEqual(PaymentError.UnenforceableDelivery)
 
     await app.shutdown()
     await streamServer.close()
@@ -1060,7 +1061,7 @@ describe('payment execution', () => {
         amountToSend: 12_345,
         sourceAsset: asset,
       })
-    ).rejects.toBe(PaymentError.ConnectorError)
+    ).rejects.toEqual(PaymentError.ConnectorError)
 
     await app.shutdown()
   })
@@ -1398,7 +1399,7 @@ describe('payment execution', () => {
     await streamServer.close()
   })
 
-  it('ends payment if receiver closes the connection', async () => {
+  it('ends payment if receiver calls finalDecline', async () => {
     const plugin = createPlugin(async (prepare) => {
       const moneyOrReply = streamServer.createReply(prepare)
       return isIlpReply(moneyOrReply) ? moneyOrReply : moneyOrReply.finalDecline()
@@ -1422,7 +1423,7 @@ describe('payment execution', () => {
     })
 
     const { error } = await pay({ plugin, destination, quote })
-    expect(error).toBe(PaymentError.ClosedByReceiver)
+    expect(error).toBe(PaymentError.ApplicationError)
   })
 
   it('works with 100% slippage', async () => {
@@ -1455,7 +1456,11 @@ describe('payment execution', () => {
     expect(quote.minExchangeRate).toEqual(Ratio.of(Int.ZERO, Int.ONE))
     expect(quote.lowEstimatedExchangeRate.a).toEqual(Int.ZERO)
 
-    const { amountSent, amountDelivered } = await pay({ plugin, destination, quote })
+    const { amountSent, amountDelivered } = await pay({
+      plugin,
+      destination,
+      quote,
+    })
     expect(amountSent).toBe(BigInt(amountToSend))
     expect(amountDelivered).toBe(BigInt(0))
   })
@@ -1491,7 +1496,7 @@ describe('payment execution', () => {
           maxSourceAmount: BigInt(0),
         },
       })
-    ).rejects.toBe(PaymentError.InvalidQuote)
+    ).rejects.toEqual(PaymentError.InvalidQuote)
 
     await expect(
       pay({
@@ -1502,7 +1507,7 @@ describe('payment execution', () => {
           minDeliveryAmount: BigInt(-1),
         },
       })
-    ).rejects.toBe(PaymentError.InvalidQuote)
+    ).rejects.toEqual(PaymentError.InvalidQuote)
 
     await expect(
       pay({
@@ -1513,7 +1518,7 @@ describe('payment execution', () => {
           maxPacketAmount: BigInt(0),
         },
       })
-    ).rejects.toBe(PaymentError.InvalidQuote)
+    ).rejects.toEqual(PaymentError.InvalidQuote)
   })
 })
 
@@ -1752,6 +1757,186 @@ describe('stream receipts', () => {
     })
     expect(amountDelivered).toBeGreaterThan(0)
     expect(streamReceipt).toBeUndefined()
+  })
+})
+
+describe('application data handling', () => {
+  it('fails immediately when packet with app data is rejected', async () => {
+    const { sharedSecret, ilpAddress: destinationAddress } = streamServer.generateCredentials()
+    const encryptionKey = generateEncryptionKey(sharedSecret)
+    const defaultStreamId = Long.fromNumber(PaymentSender.DEFAULT_STREAM_ID, true)
+
+    let rejectedPackets = 0
+    const plugin = createPlugin(async (prepare, next) => {
+      const result = streamServer.createReply(prepare)
+      if (isIlpReply(result)) return result
+
+      const money = result as IncomingMoney
+      const streamPacket = await Packet.decryptAndDeserialize(encryptionKey, prepare.data)
+      const frames = streamPacket.frames ?? []
+      const hasAppData = frames.some(
+        (frame) => frame.type === FrameType.StreamData && frame.streamId.equals(defaultStreamId)
+      )
+      const hasMoney = frames.some(
+        (frame) => frame.type === FrameType.StreamMoney && frame.streamId.equals(defaultStreamId)
+      )
+
+      if (hasAppData && hasMoney && rejectedPackets === 0) {
+        rejectedPackets++
+        return money.finalDecline('decline reason')
+      }
+
+      return next(prepare)
+    }, streamReceiver)
+
+    const destination = await setupPayment({
+      plugin,
+      destinationAddress,
+      sharedSecret,
+      destinationAsset: {
+        code: 'USD',
+        scale: 2,
+      },
+    })
+    const quote = await startQuote({
+      plugin,
+      destination,
+      amountToDeliver: 100,
+      sourceAsset: {
+        code: 'USD',
+        scale: 2,
+      },
+      slippage: 0.01,
+    })
+
+    const receipt = await pay({
+      plugin,
+      destination,
+      quote,
+      appData: Buffer.from('data-from-sender'),
+    })
+
+    expect(receipt.error).toBe(PaymentError.ApplicationError)
+    expect(rejectedPackets).toBe(1)
+    expect(receipt.applicationData).toEqual(Buffer.from('decline reason'))
+  })
+
+  it('continues when packet carrying app data is accepted', async () => {
+    const { sharedSecret, ilpAddress: destinationAddress } = streamServer.generateCredentials()
+    const encryptionKey = generateEncryptionKey(sharedSecret)
+    const defaultStreamId = Long.fromNumber(PaymentSender.DEFAULT_STREAM_ID, true)
+
+    let appDataPackets = 0
+    const plugin = createPlugin(async (prepare, next) => {
+      const streamPacket = await Packet.decryptAndDeserialize(encryptionKey, prepare.data)
+      const frames = streamPacket.frames ?? []
+      const hasAppData = frames.some(
+        (frame) => frame.type === FrameType.StreamData && frame.streamId.equals(defaultStreamId)
+      )
+
+      if (hasAppData) {
+        appDataPackets++
+      }
+
+      return next(prepare)
+    }, streamReceiver)
+
+    const destination = await setupPayment({
+      plugin,
+      destinationAddress,
+      sharedSecret,
+      destinationAsset: {
+        code: 'USD',
+        scale: 2,
+      },
+    })
+    const quote = await startQuote({
+      plugin,
+      destination,
+      amountToDeliver: 100,
+      sourceAsset: {
+        code: 'USD',
+        scale: 2,
+      },
+      slippage: 0.01,
+    })
+
+    const receipt = await pay({
+      plugin,
+      destination,
+      quote,
+      appData: Buffer.from('data-from-sender'),
+    })
+
+    expect(receipt.error).toBeUndefined()
+    expect(appDataPackets).toBe(1)
+  })
+
+  it('does not attribute later rejects to the initial app data packet', async () => {
+    const { sharedSecret, ilpAddress: destinationAddress } = streamServer.generateCredentials()
+    const encryptionKey = generateEncryptionKey(sharedSecret)
+    const defaultStreamId = Long.fromNumber(PaymentSender.DEFAULT_STREAM_ID, true)
+
+    let appDataSeen = false
+    let rejectedAfterAppData = false
+    const plugin = createPlugin(
+      createMaxPacketMiddleware(Int.from(50)!),
+      async (prepare, next) => {
+        const streamPacket = await Packet.decryptAndDeserialize(encryptionKey, prepare.data)
+        const frames = streamPacket.frames ?? []
+        const hasAppData = frames.some(
+          (frame) => frame.type === FrameType.StreamData && frame.streamId.equals(defaultStreamId)
+        )
+
+        if (hasAppData) {
+          appDataSeen = true
+          return next(prepare)
+        }
+
+        if (appDataSeen && !rejectedAfterAppData) {
+          rejectedAfterAppData = true
+          return {
+            code: IlpError.T00_INTERNAL_ERROR,
+            message: 'later failure',
+            triggeredBy: '',
+            data: Buffer.alloc(0),
+          }
+        }
+
+        return next(prepare)
+      },
+      streamReceiver
+    )
+
+    const destination = await setupPayment({
+      plugin,
+      destinationAddress,
+      sharedSecret,
+      destinationAsset: {
+        code: 'USD',
+        scale: 2,
+      },
+    })
+    const quote = await startQuote({
+      plugin,
+      destination,
+      amountToDeliver: 100,
+      sourceAsset: {
+        code: 'USD',
+        scale: 2,
+      },
+      slippage: 0.01,
+    })
+
+    const receipt = await pay({
+      plugin,
+      destination,
+      quote,
+      appData: Buffer.from('data-from-sender'),
+    })
+
+    expect(rejectedAfterAppData).toBe(true)
+    expect(receipt.error).not.toBe(PaymentError.ApplicationError)
   })
 })
 

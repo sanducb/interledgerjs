@@ -1705,7 +1705,10 @@ export class Connection extends EventEmitter {
 
     // Return the receiver's response if there was one
     let responsePacket
-    if (ilpReject.code === 'F99' && ilpReject.data.length > 0) {
+    if (
+      (ilpReject.code === 'F99' || ilpReject.code === 'F04' || ilpReject.code === 'F05') &&
+      ilpReject.data.length > 0
+    ) {
       responsePacket = await Packet.decryptAndDeserialize(this._pskKey, ilpReject.data)
 
       // Ensure the response corresponds to the request
@@ -1890,7 +1893,7 @@ export class Connection extends EventEmitter {
 
       this.undoRejectedPacket(packet)
 
-      if (response.code !== 'F99') {
+      if (response.code !== 'F99' && response.code !== 'F04') {
         return this.handleConnectorError(response, sourceAmount)
       }
     }
