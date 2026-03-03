@@ -24,6 +24,6 @@
   "dependencies": {
     "axios": "^1.0.0",
     "ilp-plugin": "^3.5.5-alpha.2",
-    "ilp-protocol-stream": "^2.7.2-alpha.2"
+    "ilp-protocol-stream": "^2.7.2-alpha.3"
   }
 }
